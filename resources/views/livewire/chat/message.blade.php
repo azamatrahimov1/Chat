@@ -5,57 +5,125 @@
         <flux:separator variant="subtle" />
     </div>
 
-    <div class="flex h-screen">
-        {{-- Chap panel: Chatlar ro‘yxati --}}
-        <div class="w-1/3 border-r overflow-y-auto p-4">
-            <h2 class="text-lg font-semibold mb-3">Chats</h2>
-            @foreach($chats as $chat)
-                <div
-                    wire:click="selectChat({{ $chat->id }})"
-                    class="cursor-pointer p-2 rounded {{ $activeChat && $activeChat->id === $chat->id ? 'bg-blue-100' : 'hover:bg-gray-100' }}">
-                    {{ $chat->name ?? 'No name chat' }}
-                </div>
-            @endforeach
-        </div>
+    <div
+        x-data="{ showSidebar: true }"
+        x-init="() => { if (window.innerWidth < 768) showSidebar = false }"
+        x-on:resize.window="showSidebar = window.innerWidth >= 768"
+        class="h-[80vh] flex bg-white dark:bg-slate-900 border rounded-lg overflow-hidden shadow-sm transition-colors duration-300"
+    >
+        <!-- Sidebar: Chats -->
+        <aside
+            x-show="showSidebar"
+            x-transition
+            class="w-full md:w-80 border-r bg-slate-50 dark:bg-slate-800 md:block"
+        >
+            <div class="px-4 py-3 flex items-center justify-between">
+                <flux:subheading size="sm" class="dark:text-slate-200">{{ __('Your Chats') }}</flux:subheading>
+                <flux:button size="sm" wire:click.prevent="$emit('openCreateChatModal')">+ {{ __('New') }}</flux:button>
+            </div>
 
-        {{-- O‘ng panel: Chat xabarlari --}}
-        <div class="flex-1 flex flex-col">
-            @if($activeChat)
-                <div class="flex justify-between items-center border-b p-3 bg-gray-50">
-                    <h3 class="font-semibold">{{ $activeChat->name ?? 'Chat' }}</h3>
-
+            <div class="px-3 overflow-y-auto h-[calc(80vh-60px)]">
+                @forelse($chats as $chat)
+                    @php
+                        $other = $chat->is_group ? null : $chat->users->where('id', '!=', auth()->id())->first();
+                        $title = $chat->is_group ? ($chat->name ?: __('Group')) : ($other?->name ?? __('Unknown'));
+                    @endphp
                     <button
-                        wire:click="$dispatch('openChatInfo', { id: {{ $activeChat->id }} })"
-                        class="text-blue-600 text-sm"
-                    >
-                        Info
+                        wire:click="selectChat({{ $chat->id }})"
+                        x-on:click="if (window.innerWidth < 768) showSidebar = false"
+                        class="w-full text-left flex items-center gap-3 px-3 py-2 rounded-md hover:bg-slate-100 dark:hover:bg-slate-700 transition
+                        {{ $activeChat && $activeChat->id === $chat->id ? 'bg-white dark:bg-slate-700 shadow-sm' : '' }}">
+                        <flux:avatar size="sm" :name="$title" />
+                        <div class="flex-1">
+                            <div class="flex items-center justify-between">
+                                <div class="font-medium text-sm dark:text-slate-100">{{ $title }}</div>
+                                <div class="text-xs text-gray-400 dark:text-gray-500">
+                                    {{ $chat->messages()->latest()->first()?->created_at?->diffForHumans() }}
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                {{ optional($chat->messages()->latest()->first())->content ?? __('No messages yet') }}
+                            </div>
+                        </div>
                     </button>
-                </div>
+                @empty
+                    <div class="p-6 text-center text-gray-500 dark:text-gray-400">
+                        {{ __('No chats yet. Click "New" to create one.') }}
+                    </div>
+                @endforelse
+            </div>
+        </aside>
 
-                <div class="flex-1 overflow-y-auto p-4 space-y-2">
-                    @foreach($messages as $message)
-                        <div class="p-2 rounded {{ $message->user_id === auth()->id() ? 'bg-blue-100 text-right' : 'bg-gray-100' }}">
-                            <strong>{{ $message->user->name }}</strong>: {{ $message->content }}
+        <!-- Chat window -->
+        <main class="flex-1 flex flex-col dark:bg-slate-900">
+            @if($activeChat)
+                <header class="px-4 py-3 border-b dark:border-slate-700 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <button x-on:click="showSidebar = true" class="md:hidden text-gray-500 dark:text-gray-300">
+                            ← {{ __('Back') }}
+                        </button>
+                        <flux:avatar :name="$activeChat->is_group ? ($activeChat->name ?: 'Group') : ($activeChat->users->where('id','!=',auth()->id())->first()?->name ?? 'User')" />
+                        <div>
+                            <div class="font-semibold dark:text-slate-100">
+                                {{ $activeChat->is_group ? ($activeChat->name ?: __('Group')) : ($activeChat->users->where('id','!=',auth()->id())->first()?->name ?? __('User')) }}
+                            </div>
+                            <div class="text-xs text-gray-400 dark:text-gray-500">
+                                {{ $activeChat->is_group ? count($activeChat->users) . ' members' : __('Private chat') }}
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <div id="messagesContainer" wire:ignore
+                     x-data x-ref="scroller"
+                     x-init="() => {
+                    const el = $refs.scroller;
+                    el.scrollTop = el.scrollHeight;
+                    Livewire.on('message-sent', () => setTimeout(()=> el.scrollTop = el.scrollHeight, 50));
+                    Livewire.on('chat-selected', () => setTimeout(()=> el.scrollTop = el.scrollHeight, 50));
+                }"
+                     class="flex-1 p-6 overflow-y-auto bg-gradient-to-b from-slate-50 to-white dark:from-slate-900 dark:to-slate-800"
+                >
+                    @foreach($messages as $msg)
+                        <div class="mb-3 flex {{ $msg->user_id === auth()->id() ? 'justify-end' : 'justify-start' }}">
+                            <div class="max-w-[75%]">
+                                <div class="inline-flex items-end gap-2">
+                                    @if($msg->user_id !== auth()->id())
+                                        <flux:avatar size="xs" :name="$msg->user->name" />
+                                    @endif
+                                    <div class="px-4 py-2 rounded-2xl
+                                            {{ $msg->user_id === auth()->id() ? 'bg-blue-600 text-white' : 'bg-white dark:bg-slate-700 border dark:border-slate-600' }}">
+                                        <div class="text-sm leading-relaxed break-words">{{ $msg->content }}</div>
+                                        <div class="text-[10px] mt-1 text-gray-400 dark:text-gray-300">
+                                            {{ $msg->created_at->format('H:i, d M') }} • {{ $msg->user->name }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     @endforeach
                 </div>
 
-                <div class="p-3 border-t flex">
-                    <input
-                        type="text"
-                        wire:model="newMessage"
-                        wire:keydown.enter="sendMessage"
-                        class="flex-1 border rounded p-2"
-                        placeholder="Write message..."
-                    >
-                    <button wire:click="sendMessage" class="ml-2 px-4 py-2 bg-blue-500 text-white rounded">Send</button>
+                <div class="px-4 py-3 border-t dark:border-slate-700 bg-white dark:bg-slate-800">
+                    <div class="flex gap-3">
+                        <input wire:model.defer="newMessage"
+                               wire:keydown.enter="sendMessage"
+                               type="text"
+                               placeholder="{{ __('Type a message...') }}"
+                               class="flex-1 rounded-full border dark:border-slate-600 bg-transparent px-4 py-2 text-slate-800 dark:text-slate-100 focus:ring focus:outline-none"
+                        />
+                        <flux:button wire:click="sendMessage" class="shrink-0">{{ __('Send') }}</flux:button>
+                    </div>
                 </div>
             @else
-                <div class="flex items-center justify-center flex-1 text-gray-500">
-                    Chatni tanlang 👈
+                <div class="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-300">
+                    <div class="max-w-md text-center">
+                        <p class="mb-4">{{ __('Select a chat to start messaging') }}</p>
+                        <flux:button wire:click="$emit('openCreateChatModal')">{{ __('Create chat') }}</flux:button>
+                    </div>
                 </div>
             @endif
-        </div>
+        </main>
     </div>
 
 </div>
