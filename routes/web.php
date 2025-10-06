@@ -1,5 +1,6 @@
 <?php
 
+use App\Livewire\Chat\Message;
 use App\Livewire\Settings\Appearance;
 use App\Livewire\Settings\Password;
 use App\Livewire\Settings\Profile;
@@ -32,6 +33,8 @@ Route::middleware(['auth'])->group(function () {
             ),
         )
         ->name('two-factor.show');
+
+    Route::get('messages', Message::class)->name('message');
 });
 
 require __DIR__.'/auth.php';
